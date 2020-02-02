@@ -11,7 +11,6 @@ const byte TONE_PIN = 9;
 const byte LDR_PIN = A0;
 
 const unsigned long DISPLAY_REFRESH_INTERVAL_MAX = 10000; // microseconds (power saving)
-const unsigned long LDR_ANALOG_READ_MULTIPLE = (DISPLAY_REFRESH_INTERVAL_MAX / 1000) - 1; // 1000 because max analog reading is 1023
 const unsigned long DISPLAY_TIMEOUT = 5000; // miliseconds
 const unsigned long ALARM_INTERVAL = 10000; // miliseconds
 
@@ -24,7 +23,7 @@ enum {
 Encoder encoder(ENCODER_PIN_A, ENCODER_PIN_B);
 
 uint16_t seconds = 0;
-byte digitBuffer[4] = {0, 0, 0, 0};
+byte digitBuffer[4];
 
 void setup() {
   pinMode(DISPLAY_DATA_PIN, OUTPUT);
@@ -36,7 +35,7 @@ void setup() {
   // attachInterupt for wakeup with encoder button. alternative is to configure registers
   attachInterrupt(digitalPinToInterrupt(BUTTON_PIN), [](){}, FALLING); // [](){} is empty anonymous function
 
-  showDisplay(); // to clear it
+  showDigits();
 }
 
 void loop() {
@@ -57,9 +56,10 @@ void loop() {
     previousMillis = currentMillis;
     if (seconds > 0) {
       seconds--;
-      seconds2digits();
+      showDigits();
       if (seconds == 0) {
         state = ALARM;
+        alarmBlink = false;
         alarmStartMillis = millis();
         alarmSound(true); // with reset
       }
@@ -76,11 +76,11 @@ void loop() {
       if (dir > 0) {
         if (seconds < 6000) { // 100 minutes
           seconds += step;
-          seconds2digits();
+          showDigits();
         }
       } else if (seconds > 0) {
         seconds -= step;
-        seconds2digits();
+        showDigits();
       }
       state = PAUSE;
     }
@@ -91,6 +91,7 @@ void loop() {
   if (digitalRead(BUTTON_PIN) == LOW && currentMillis - buttonDebounceMillis >= 500) {
     buttonDebounceMillis = currentMillis;
     state = (state == PAUSE) ? COUNTDOWN : PAUSE;
+    displayTimeoutMillis = 0;
   }
 
   // display timeout and sleep
@@ -99,28 +100,29 @@ void loop() {
       displayTimeoutMillis = currentMillis;
     }
     if ((currentMillis - displayTimeoutMillis > DISPLAY_TIMEOUT)) {
+      noTone(TONE_PIN);
       set_sleep_mode(SLEEP_MODE_PWR_DOWN);
       sleep_enable();
       sleep_cpu();
     }
   }
 
-  unsigned long displayRefreshInterval = DISPLAY_REFRESH_INTERVAL_MAX - (analogRead(LDR_PIN) * LDR_ANALOG_READ_MULTIPLE);
-
+  unsigned long displayRefreshInterval = map(analogRead(LDR_PIN), 0, 1024, DISPLAY_REFRESH_INTERVAL_MAX, 0);
+  
   // display refresh
   if (state != ALARM && micros() - displayRefreshMicros > displayRefreshInterval) {
     displayRefreshMicros = micros();
-    showDisplay();
+    refreshDisplay();
   }
 
   // alarm
   if (state == ALARM) {
-    if (currentMillis - previousMillis >= 500) {
+    if (currentMillis - previousMillis >= 700) {
       previousMillis = millis();
       alarmBlink = !alarmBlink;
     }
     if (alarmBlink) {
-      showDisplay(); // refreshed in every loop for full brightness
+      refreshDisplay(); // refreshed in every loop for full brightness
     }
     alarmSound(false);
     if (millis() - alarmStartMillis > ALARM_INTERVAL) {
@@ -130,7 +132,7 @@ void loop() {
 
 }
 
-void seconds2digits() {
+void showDigits() {
   uint8_t minutes = seconds / 60;
   uint8_t secs = seconds % 60;
 
@@ -140,7 +142,7 @@ void seconds2digits() {
   digitBuffer[3] = secs % 10;
 }
 
-void showDisplay() {
+void refreshDisplay() {
 
   const byte digit[10] = { //
       0b11000000, // 0
@@ -159,7 +161,11 @@ void showDisplay() {
 
   for (byte i = 0; i < 4; i++) {
     digitalWrite(DISPLAY_RCLK_PIN, LOW);
-    shiftOut(DISPLAY_DATA_PIN, DISPLAY_SCLK_PIN, MSBFIRST, digit[digitBuffer[i]]);
+    byte segments = digit[digitBuffer[i]];
+    if (i == 1) {
+      segments &= 0b01111111; // set colon
+    }
+    shiftOut(DISPLAY_DATA_PIN, DISPLAY_SCLK_PIN, MSBFIRST, segments);
     shiftOut(DISPLAY_DATA_PIN, DISPLAY_SCLK_PIN, MSBFIRST, chr[i]);
     digitalWrite(DISPLAY_RCLK_PIN, HIGH);
   }
