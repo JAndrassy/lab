@@ -70,7 +70,18 @@ void loop() {
     if (currentMillis - encoderDebounceMillis >= 50) {
       encoderDebounceMillis = currentMillis;
       displayTimeoutMillis = 0; // reset timeout
-      int step = seconds < 60 ? 1 : 10;
+      int step;
+      if (seconds + dir > 6 * 60) {
+        step = 60;
+      } else if (seconds + dir > 3 * 60) {
+        step = 30;
+      } else if (seconds + dir > 60) {
+        step = 15;
+      } else if (seconds == 0) {
+        step = 10;
+      } else {
+        step = 5;
+      }
       if (dir > 0) {
         if (seconds < 6000) { // 100 minutes
           seconds += step;

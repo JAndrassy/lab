@@ -4,8 +4,8 @@
 const byte BUTTON_PIN = 2;  // external interrupt pin
 const byte ENCODER_PIN_A = 3; // external interrupt pin
 const byte ENCODER_PIN_B = 4;
-const byte DISPLAY_DATA_PIN = 5;
-const byte DISPLAY_RCLK_PIN = 6;
+const byte DISPLAY_RCLK_PIN = 5;
+const byte DISPLAY_DATA_PIN = 6;
 const byte DISPLAY_SCLK_PIN = 7;
 const byte TONE_PIN = 9;
 const byte LDR_PIN = A0;
@@ -26,8 +26,8 @@ uint16_t seconds = 0;
 byte digitBuffer[4];
 
 void setup() {
-  pinMode(DISPLAY_DATA_PIN, OUTPUT);
   pinMode(DISPLAY_RCLK_PIN, OUTPUT);
+  pinMode(DISPLAY_DATA_PIN, OUTPUT);
   pinMode(DISPLAY_SCLK_PIN, OUTPUT);
 
   pinMode(BUTTON_PIN, INPUT_PULLUP);
@@ -72,7 +72,18 @@ void loop() {
     if (currentMillis - encoderDebounceMillis >= 50) {
       encoderDebounceMillis = currentMillis;
       displayTimeoutMillis = 0; // reset timeout
-      int step = seconds < 60 ? 1 : 10;
+      int step;
+      if (seconds + dir > 6 * 60) {
+        step = 60;
+      } else if (seconds + dir > 3 * 60) {
+        step = 30;
+      } else if (seconds + dir > 60) {
+        step = 15;
+      } else if (seconds == 0) {
+        step = 10;
+      } else {
+        step = 5;
+      }
       if (dir > 0) {
         if (seconds < 6000) { // 100 minutes
           seconds += step;
@@ -108,7 +119,6 @@ void loop() {
   }
 
   unsigned long displayRefreshInterval = map(analogRead(LDR_PIN), 0, 1024, DISPLAY_REFRESH_INTERVAL_MAX, 0);
-  
   // display refresh
   if (state != ALARM && micros() - displayRefreshMicros > displayRefreshInterval) {
     displayRefreshMicros = micros();
