@@ -1,5 +1,6 @@
 #include <TM1637Display.h>
 #include <Encoder.h>
+#include <Bounce2.h>
 #include <avr/sleep.h>
 
 const byte BUTTON_PIN = 2;  // external interrupt pin
@@ -10,54 +11,54 @@ const byte DISPLAY_DATA_PIN = 6;
 const byte TONE_PIN = 9;
 const byte LDR_PIN = A0;
 
-const unsigned long DISPLAY_TIMEOUT = 5000; // miliseconds
+const unsigned long LONG_PUSH_INTERVAL = 3000; // miliseconds
+const unsigned long TIMER_DISPLAY_TIMEOUT = 5000; // miliseconds
 const unsigned long ALARM_INTERVAL = 10000; // miliseconds
 
 enum {
-  PAUSE,
+  SET_TIMER,
   COUNTDOWN,
   ALARM
 };
 
 TM1637Display display(DISPLAY_SCLK_PIN, DISPLAY_DATA_PIN);
 Encoder encoder(ENCODER_PIN_A, ENCODER_PIN_B);
+Bounce button;
 
-uint16_t seconds = 0;
+uint16_t timerSeconds = 0;
 byte digitBuffer[4];
 
-void setup() {
-  pinMode(DISPLAY_DATA_PIN, OUTPUT);
-  pinMode(DISPLAY_SCLK_PIN, OUTPUT);
+int lastLDRReading;
 
-  pinMode(BUTTON_PIN, INPUT_PULLUP);
+void setup() {
+
+  button.attach(BUTTON_PIN, INPUT_PULLUP);
 
   // attachInterupt for wakeup with encoder button. alternative is to configure registers
   attachInterrupt(digitalPinToInterrupt(BUTTON_PIN), [](){}, FALLING); // [](){} is empty anonymous function
 
-  showDigits();
+  showTimer();
 }
 
 void loop() {
 
   static unsigned long previousMillis;
-  static unsigned long encoderDebounceMillis;
-  static unsigned long buttonDebounceMillis;
   static unsigned long displayTimeoutMillis;
   static unsigned long alarmStartMillis;
-  static byte alarmBlink;
-  static byte state = PAUSE;
+  static byte blink;
+  static byte state = SET_TIMER;
 
   unsigned long currentMillis = millis();
 
   // countdown
   if (state == COUNTDOWN && currentMillis - previousMillis >= 1000) {
-    previousMillis = currentMillis;
-    if (seconds > 0) {
-      seconds--;
-      showDigits();
-      if (seconds == 0) {
+    previousMillis += 1000;
+    if (timerSeconds > 0) {
+      timerSeconds--;
+      showTimer();
+      if (timerSeconds == 0) {
         state = ALARM;
-        alarmBlink = false;
+        blink = false;
         alarmStartMillis = millis();
         alarmSound(true); // with reset
       }
@@ -65,51 +66,93 @@ void loop() {
   }
 
   // encoder
+  static unsigned long encoderDebounceMillis;
   int dir = encoder.read();
   if (dir) {
     if (currentMillis - encoderDebounceMillis >= 50) {
       encoderDebounceMillis = currentMillis;
       displayTimeoutMillis = 0; // reset timeout
       int step;
-      if (seconds + dir > 6 * 60) {
+      if (timerSeconds + dir > 6 * 60) {
         step = 60;
-      } else if (seconds + dir > 3 * 60) {
+      } else if (timerSeconds + dir > 3 * 60) {
         step = 30;
-      } else if (seconds + dir > 60) {
+      } else if (timerSeconds + dir > 60) {
         step = 15;
-      } else if (seconds == 0) {
+      } else if (timerSeconds == 0) {
         step = 10;
       } else {
         step = 5;
       }
       if (dir > 0) {
-        if (seconds < 6000) { // 100 minutes
-          seconds += step;
-          showDigits();
+        if (timerSeconds < 6000) { // 100 minutes
+          if (state != COUNTDOWN) {
+            step = step - (timerSeconds % step);
+          }
+          timerSeconds += step;
+          showTimer();
         }
-      } else if (seconds > 0) {
-        seconds -= step;
-        showDigits();
+      } else if (timerSeconds > 0) {
+        if (state != COUNTDOWN) {
+          int m = timerSeconds % step;
+          if (m != 0) {
+            step = m;
+          }
+        }
+        timerSeconds -= step;
+        showTimer();
       }
-      state = PAUSE;
+      if (state != COUNTDOWN) {
+        state = SET_TIMER;
+      }
     }
     encoder.write(0);
   }
 
   // button
-  if (digitalRead(BUTTON_PIN) == LOW && currentMillis - buttonDebounceMillis >= 500) {
-    buttonDebounceMillis = currentMillis;
-    state = (state == PAUSE) ? COUNTDOWN : PAUSE;
+  static unsigned long buttonPushedMillis;
+  button.update();
+  if (button.fell()) {
+    buttonPushedMillis = currentMillis;
+  }
+  if (buttonPushedMillis && currentMillis - buttonPushedMillis > LONG_PUSH_INTERVAL) {
+    buttonPushedMillis = 0;
     displayTimeoutMillis = 0;
+    switch (state) {
+      case SET_TIMER:
+        timerSeconds = 0;
+        showTimer();
+        break;
+    }
+  }  
+  if (button.rose() && buttonPushedMillis != 0) {
+    buttonPushedMillis = 0;
+    displayTimeoutMillis = 0;
+    switch (state) {
+      case COUNTDOWN:
+        state = SET_TIMER;
+        break;
+      case ALARM:
+        state = SET_TIMER;
+        lastLDRReading = 0; // to reset full brightness of ALARM
+        showTimer();
+        break;
+      case SET_TIMER:
+        if (timerSeconds > 0) {
+          state = COUNTDOWN;
+          previousMillis = millis();
+        }
+        break;
+    }
   }
 
-  // display timeout and sleep
-  if (state == PAUSE) {
+  // timer display timeout
+  if (state == SET_TIMER) {
     if (displayTimeoutMillis == 0) {
       displayTimeoutMillis = currentMillis;
     }
-    if ((currentMillis - displayTimeoutMillis > DISPLAY_TIMEOUT)) {
-      noTone(TONE_PIN);
+    if ((currentMillis - displayTimeoutMillis > TIMER_DISPLAY_TIMEOUT)) {
+      displayTimeoutMillis = 0;
       display.setBrightness(0, false);
       display.showNumberDec(0, 3, 0);
       set_sleep_mode(SLEEP_MODE_PWR_DOWN);
@@ -121,23 +164,23 @@ void loop() {
   // alarm
   if (state == ALARM) {
     if (currentMillis - previousMillis >= 700) {
-      previousMillis = millis();
-      alarmBlink = !alarmBlink;
-      display.setBrightness(7, alarmBlink);
+      previousMillis = currentMillis;
+      blink = !blink;
+      display.setBrightness(7, blink);
       display.showNumberDecEx(0, 0b0100000, 3, 0);
     }
     alarmSound(false);
-    if (millis() - alarmStartMillis > ALARM_INTERVAL) {
-      state = PAUSE;
+    if (currentMillis - alarmStartMillis > ALARM_INTERVAL) {
+      state = SET_TIMER;
+      lastLDRReading = 0; // to reset full brightness of ALARM
     }
   }
-
 }
 
-void showDigits() {
+void showTimer() {
 
-  uint8_t minutes = seconds / 60;
-  uint8_t secs = seconds % 60;
+  uint8_t minutes = timerSeconds / 60;
+  uint8_t secs = timerSeconds % 60;
 
   digitBuffer[0] = minutes / 10;
   digitBuffer[1] = minutes % 10;
@@ -150,8 +193,12 @@ void showDigits() {
   }
   data[1] |= 0x80; // colon
 
-  byte brightness = map(analogRead(LDR_PIN), 0, 1024, 1, 8);
-  display.setBrightness(brightness);
+  int a = analogRead(LDR_PIN);
+  if (abs(a - lastLDRReading) > 10) {
+    lastLDRReading = a;
+    byte brightness = map(a, 0, 1024, 0, 8);
+    display.setBrightness(brightness, true);
+  }
   display.setSegments(data);
 }
 
