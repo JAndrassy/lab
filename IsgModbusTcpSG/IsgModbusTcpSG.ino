@@ -34,24 +34,19 @@
 
 #define VERSION "0.17"
 
-const int MODBUS_CONNECT_ERROR = -10;
-const int MODBUS_NO_RESPONSE = -11;
 
 const byte FNC_H_READ_REGS = 0x03;
 const byte FNC_I_READ_REGS = 0x04;
 const byte FNC_WRITE_SINGLE = 0x06;
 const byte FNC_ERR_FLAG = 0x80;
+const int MODBUS_NO_RESPONSE = -11;
 
 const byte mac[] = { 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED };
 
 const byte INPUT_PIN = 3;
-const int ETH_CS_PIN = 10;
+const byte ETH_CS_PIN = 10;
 
 const byte CHECK_OP_STATE_INTERVAL = 15; // seconds
-
-bool automaticMode = true;
-bool isgSgInput1IsON;
-bool waitingForSGOpStateChange = false;
 
 const IPAddress ip(192, 168, 1, 200);
 const IPAddress isgAddress(192, 168, 1, 100);
@@ -59,6 +54,10 @@ const IPAddress isgAddress(192, 168, 1, 100);
 EthernetServer telnetServer(2323);
 EthernetClient telnetClient;
 Stream* terminal;
+
+bool automaticMode = true;
+bool isgSgInput1IsON;
+bool waitingForSGOpStateChange = false;
 
 void setup() {
   Serial.begin(115200);
@@ -83,7 +82,7 @@ void loop() {
   Ethernet.maintain();
 
   if (!telnetClient) {
-    telnetClient = telnetServer.available();
+    telnetClient = telnetServer.accept();
     if (telnetClient.connected()) {
       telnetClient.println(F("ISGweb SG Ready adapter version " VERSION));
       terminal = &telnetClient;
@@ -257,10 +256,8 @@ int modbusRequest(Client& client, byte fnc, unsigned int addr, byte len, short *
   int respDataLen = len * 2;
   byte response[max((int) DATA_IX, respDataLen)];
   int readLen = client.readBytes(response, DATA_IX);
-  if (readLen < DATA_IX) {
-    client.stop();
+  if (readLen < DATA_IX)
     return MODBUS_NO_RESPONSE;
-  }
   if (response[CODE_IX] == (FNC_ERR_FLAG | fnc))
     return response[ERR_CODE_IX]; // 0x01, 0x02, 0x03 or 0x11
   if (response[CODE_IX] != fnc)
@@ -292,10 +289,8 @@ int modbusWriteSingle(Client& client, unsigned int address, int val) {
 
   byte response[RESPONSE_LENGTH];
   int readLen = client.readBytes(response, RESPONSE_LENGTH);
-  if (readLen < RESPONSE_LENGTH) {
-    client.stop();
+  if (readLen < RESPONSE_LENGTH)
     return MODBUS_NO_RESPONSE;
-  }
   switch (response[CODE_IX]) {
     case FNC_WRITE_SINGLE:
       break;
