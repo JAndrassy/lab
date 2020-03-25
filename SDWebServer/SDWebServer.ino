@@ -1,11 +1,11 @@
-#include <UIPEthernet.h>
+#include <Ethernet.h>
 #include <SD.h>
 #include <StreamLib.h> // install in Library Manager. Used to generate HTML of directory listing
 
 byte mac[] = { 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED };
 
-const int SDCARD_CS = PA3;
-const int ETHERNET_CS = PA4;
+const int SDCARD_CS = 4;
+const int ETHERNET_CS = 10;
 
 EthernetServer server(80);
 
@@ -37,7 +37,7 @@ void setup() {
 
   IPAddress ip = Ethernet.localIP();
   Serial.println();
-  Serial.println(F("Connected to WiFi network."));
+  Serial.println(F("Connected to network."));
   Serial.print(F("To access the server, enter \"http://"));
   Serial.print(ip);
   Serial.println(F("/\" in web browser."));
@@ -46,17 +46,15 @@ void setup() {
 
 void loop() {
 
-  static File file; // must by static to be accessible by the lambda functions
-  static char fn[32];
-
   EthernetClient client = server.available();
 
   if (client && client.connected()) {
     if (client.find(' ')) { // GET /fn HTTP/1.1
+      char fn[32];
       int l = client.readBytesUntil(' ', fn, sizeof(fn) - 1); // read the filename from URL
       fn[l] = 0;
-      client.find("\r\n\r\n");
-      file = SD.open(fn);
+      client.find((char*) "\r\n\r\n");
+      File file = SD.open(fn);
       if (!file) { // file was not found
         client.println(F("HTTP/1.1 404 Not Found"));
         client.println(F("Connection: close"));
