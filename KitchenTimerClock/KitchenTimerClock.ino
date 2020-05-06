@@ -1,13 +1,13 @@
 #include <TM1637Display.h>
 #include <Encoder.h>
 #include <Bounce2.h>
+#include <toneAC.h>
 
 const byte BUTTON_PIN = 2;  // external interrupt pin
 const byte ENCODER_PIN_A = 3; // external interrupt pin
 const byte ENCODER_PIN_B = 4;
-const byte DISPLAY_SCLK_PIN = 5;
-const byte DISPLAY_DATA_PIN = 6;
-const byte TONE_PIN = 9;
+const byte DISPLAY_DATA_PIN = 5;
+const byte DISPLAY_SCLK_PIN = 6;
 const byte LDR_PIN = A0;
 
 const unsigned long LONG_PUSH_INTERVAL = 3000; // miliseconds
@@ -310,6 +310,6 @@ void alarmSound(bool reset) {
       next += ALARM_TONE_PAUSE;
       count = 0;
     }
-    tone(TONE_PIN, (count % 2) ? ALARM_BEEP_1 : ALARM_BEEP_2, ALARM_TONE_LENGTH);
+    toneAC((count % 2) ? ALARM_BEEP_1 : ALARM_BEEP_2, 10, ALARM_TONE_LENGTH, true);
   }
 }
