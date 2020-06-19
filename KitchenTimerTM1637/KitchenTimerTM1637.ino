@@ -1,21 +1,25 @@
-#include <TM1637Display.h>
-#include <Encoder.h>
-#include <Bounce2.h>
+#include <TM1637Display.h> // author Avishay Orpaz
+#include <Encoder.h> // author Paul Stoffregen
+#include <Bounce2.h> // maintainer Thomas O Fredericks
 #include <avr/sleep.h>
 
 const byte BUTTON_PIN = 2;  // external interrupt pin
 const byte ENCODER_PIN_A = 3; // external interrupt pin
 const byte ENCODER_PIN_B = 4;
-const byte DISPLAY_SCLK_PIN = 5;
-const byte DISPLAY_DATA_PIN = 6;
+const byte DISPLAY_DATA_PIN = 5;
+const byte DISPLAY_SCLK_PIN = 6;
 const byte TONE_PIN = 9;
 const byte LDR_PIN = A0;
 
-const unsigned long LONG_PUSH_INTERVAL = 3000; // miliseconds
-const unsigned long TIMER_DISPLAY_TIMEOUT = 5000; // miliseconds
-const unsigned long ALARM_INTERVAL = 10000; // miliseconds
+const byte ENCODER_PULSES_PER_STEP = 2;
+const unsigned DISPLAY_REFRESH_INTERVAL = 100; // milliseconds
+const unsigned LONG_PUSH_INTERVAL = 3000; // miliseconds
+const unsigned ALARM_BLINK_MILLIS = 700;
+const unsigned TIMER_DISPLAY_TIMEOUT = 5000; // miliseconds
+const unsigned ALARM_INTERVAL = 9600; // miliseconds
 
 enum {
+  SLEEP,
   SET_TIMER,
   COUNTDOWN,
   ALARM
@@ -25,10 +29,8 @@ TM1637Display display(DISPLAY_SCLK_PIN, DISPLAY_DATA_PIN);
 Encoder encoder(ENCODER_PIN_A, ENCODER_PIN_B);
 Bounce button;
 
-uint16_t timerSeconds = 0;
-byte digitBuffer[4];
-
-int lastLDRReading;
+unsigned timerSeconds = 0;
+byte displayData[4];
 
 void setup() {
 
@@ -43,6 +45,7 @@ void setup() {
 void loop() {
 
   static unsigned long previousMillis;
+  static unsigned long displayRefreshMillis;
   static unsigned long displayTimeoutMillis;
   static unsigned long alarmStartMillis;
   static byte blink;
@@ -66,13 +69,13 @@ void loop() {
   }
 
   // encoder
-  static unsigned long encoderDebounceMillis;
   int dir = encoder.read();
-  if (dir) {
-    if (currentMillis - encoderDebounceMillis >= 50) {
-      encoderDebounceMillis = currentMillis;
+  if (abs(dir) >= ENCODER_PULSES_PER_STEP) {
+    if (state == SLEEP) {
+      state = SET_TIMER; // only wake-up
+    } else {
       displayTimeoutMillis = 0; // reset timeout
-      int step;
+      byte step;
       if (timerSeconds + dir > 6 * 60) {
         step = 60;
       } else if (timerSeconds + dir > 3 * 60) {
@@ -85,22 +88,24 @@ void loop() {
         step = 5;
       }
       if (dir > 0) {
-        if (timerSeconds < 6000) { // 100 minutes
-          if (state != COUNTDOWN) {
-            step = step - (timerSeconds % step);
-          }
+        if (state != COUNTDOWN) {
+          step = step - (timerSeconds % step);
+        }
+        if (timerSeconds + step < 6000) { // 100 minutes
           timerSeconds += step;
           showTimer();
         }
-      } else if (timerSeconds > 0) {
+      } else {
         if (state != COUNTDOWN) {
           int m = timerSeconds % step;
           if (m != 0) {
             step = m;
           }
         }
-        timerSeconds -= step;
-        showTimer();
+        if (timerSeconds >= step) {
+          timerSeconds -= step;
+          showTimer();
+        }
       }
       if (state != COUNTDOWN) {
         state = SET_TIMER;
@@ -129,12 +134,14 @@ void loop() {
     buttonPushedMillis = 0;
     displayTimeoutMillis = 0;
     switch (state) {
+      case SLEEP:
+        state = SET_TIMER;
+        break;
       case COUNTDOWN:
         state = SET_TIMER;
         break;
       case ALARM:
         state = SET_TIMER;
-        lastLDRReading = 0; // to reset full brightness of ALARM
         showTimer();
         break;
       case SET_TIMER:
@@ -153,6 +160,7 @@ void loop() {
     }
     if ((currentMillis - displayTimeoutMillis > TIMER_DISPLAY_TIMEOUT)) {
       displayTimeoutMillis = 0;
+      state = SLEEP;
       display.setBrightness(0, false);
       display.showNumberDec(0, 3, 0);
       set_sleep_mode(SLEEP_MODE_PWR_DOWN);
@@ -163,43 +171,50 @@ void loop() {
 
   // alarm
   if (state == ALARM) {
-    if (currentMillis - previousMillis >= 700) {
+    if (currentMillis - previousMillis >= ALARM_BLINK_MILLIS) {
       previousMillis = currentMillis;
       blink = !blink;
-      display.setBrightness(7, blink);
-      display.showNumberDecEx(0, 0b0100000, 3, 0);
     }
     alarmSound(false);
     if (currentMillis - alarmStartMillis > ALARM_INTERVAL) {
       state = SET_TIMER;
-      lastLDRReading = 0; // to reset full brightness of ALARM
     }
+  }
+
+  // display refresh
+  if (currentMillis - displayRefreshMillis > DISPLAY_REFRESH_INTERVAL) {
+    displayRefreshMillis = currentMillis;
+    static int lastLDRReading = 1300; // init out of range
+    if (state == ALARM) {
+      display.setBrightness(7, blink);
+      lastLDRReading = 1300;
+    } else {
+      int a = analogRead(LDR_PIN);
+      if (abs(a - lastLDRReading) > 20) {
+        lastLDRReading = a;
+        byte brightness = map(a, 0, 1024, 1, 8);
+        display.setBrightness(brightness, true);
+      }
+    }
+    display.setSegments(displayData);
   }
 }
 
 void showTimer() {
 
-  uint8_t minutes = timerSeconds / 60;
-  uint8_t secs = timerSeconds % 60;
+  byte minutes = timerSeconds / 60;
+  byte secs = timerSeconds % 60;
 
+  byte digitBuffer[4];
   digitBuffer[0] = minutes / 10;
   digitBuffer[1] = minutes % 10;
   digitBuffer[2] = secs / 10;
   digitBuffer[3] = secs % 10;
 
-  uint8_t data[4];
   for (int i = 0; i < 4; i++) {
-    data[i] = display.encodeDigit(digitBuffer[i]);
+    displayData[i] = display.encodeDigit(digitBuffer[i]);
   }
-  data[1] |= 0x80; // colon
-
-  int a = analogRead(LDR_PIN);
-  if (abs(a - lastLDRReading) > 10) {
-    lastLDRReading = a;
-    byte brightness = map(a, 0, 1024, 0, 8);
-    display.setBrightness(brightness, true);
-  }
-  display.setSegments(data);
+  displayData[1] |= 0x80; // colon
 }
 
 void alarmSound(bool reset) {
