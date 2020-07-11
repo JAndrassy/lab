@@ -6,6 +6,7 @@ byte mac[] = { 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED };
 
 const int SDCARD_CS = 4;
 const int ETHERNET_CS = 10;
+const int DOWNLOAD_BUFFER_SIZE = 512;
 
 EthernetServer server(80);
 
@@ -93,17 +94,20 @@ void loop() {
         chunked.println(F("</body>\r\n</html>"));
         chunked.end();
       } else {
-          client.println(F("HTTP/1.1 200 OK"));
-          client.println(F("Connection: close"));
-          client.print(F("Content-Length: "));
-          client.println(file.size());
-          client.print(F("Content-Type: "));
-          const char* ext = strchr(file.name(), '.');
-          client.println(getContentType(ext));
-          client.println();
+        char buff[DOWNLOAD_BUFFER_SIZE];
+        BufferedPrint bp(client, buff, sizeof(buff));
+        bp.println(F("HTTP/1.1 200 OK"));
+        bp.println(F("Connection: close"));
+        bp.print(F("Content-Length: "));
+        bp.println(file.size());
+        bp.print(F("Content-Type: "));
+        const char* ext = strchr(file.name(), '.');
+        bp.println(getContentType(ext));
+        bp.println();
         while (file.available()) {
-          client.write(file.read()); // send the file as body of the response
+          bp.write(file.read()); // send the file as body of the response
         }
+        bp.flush();
         file.close();
       }
     }
