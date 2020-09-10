@@ -1,12 +1,12 @@
 #include <Ethernet.h>
 #include <SD.h>
-#include <StreamLib.h> // install in Library Manager. Used to generate HTML of directory listing
+#include <StreamLib.h>
 
 byte mac[] = { 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED };
 
 const int SDCARD_CS = 4;
 const int ETHERNET_CS = 10;
-const int DOWNLOAD_BUFFER_SIZE = 512;
+const int RESPONSE_BUFFER_SIZE = 64;
 
 EthernetServer server(80);
 
@@ -57,58 +57,62 @@ void loop() {
       client.find((char*) "\r\n\r\n");
       File file = SD.open(fn);
       if (!file) { // file was not found
-        client.println(F("HTTP/1.1 404 Not Found"));
-        client.println(F("Connection: close"));
-        client.print(F("Content-Length: "));
-        client.println(strlen(" not found") + strlen(fn));
-        client.println();
-        client.print(fn);
-        client.print(F(" not found"));
+        char buff[RESPONSE_BUFFER_SIZE];
+        BufferedPrint response(client, buff, sizeof(buff));
+        response.println(F("HTTP/1.1 404 Not Found"));
+        response.println(F("Connection: close"));
+        response.print(F("Content-Length: "));
+        response.println(strlen(" not found") + strlen(fn));
+        response.println();
+        response.print(fn);
+        response.print(F(" not found"));
+        response.flush();
       } else if (file.isDirectory()) {
-        client.println(F("HTTP/1.1 200 OK"));
-        client.println(F("Connection: close"));
-        client.println(F("Content-Type: text/html"));
-        client.println(F("Transfer-Encoding: chunked"));
-        client.println();
-        char buff[64]; // buffer for chunks
-        ChunkedPrint chunked(client, buff, sizeof(buff));
-        chunked.begin();
-        chunked.printf(F("<!DOCTYPE html>\r\n<html>\r\n<body>\r\n<h3>Folder '%s'</h3>\r\n"), fn);
+        char buff[RESPONSE_BUFFER_SIZE]; // buffer for chunks
+        ChunkedPrint chunkedResp(client, buff, sizeof(buff));
+        chunkedResp.println(F("HTTP/1.1 200 OK"));
+        chunkedResp.println(F("Connection: close"));
+        chunkedResp.println(F("Content-Type: text/html"));
+        chunkedResp.println(F("Transfer-Encoding: chunked"));
+        chunkedResp.println();
+        chunkedResp.begin();
+        chunkedResp.printf(F("<!DOCTYPE html>\r\n<html>\r\n<body>\r\n<h3>Folder '%s'</h3>\r\n"), fn);
         while (true) {
           File entry = file.openNextFile();
           if (!entry)
             break;
           if (strcmp(fn, "/") == 0) {
-            chunked.printf(F("<a href='%s'>"), entry.name());
+            chunkedResp.printf(F("<a href='%s'>"), entry.name());
           } else {
-            chunked.printf(F("<a href='%s/%s'>"), fn, entry.name());
+            chunkedResp.printf(F("<a href='%s/%s'>"), fn, entry.name());
           }
-          chunked.print(entry.name());
+          chunkedResp.print(entry.name());
           if (entry.isDirectory()) {
-            chunked.println(F("/</a><br>"));
+            chunkedResp.println(F("/</a><br>"));
           } else {
-            chunked.printf(F("</a> (%ld b)<br>\r\n"), entry.size());
+            chunkedResp.printf(F("</a> (%ld b)<br>\r\n"), entry.size());
           }
           entry.close();
         }
-        chunked.println(F("</body>\r\n</html>"));
-        chunked.end();
+        chunkedResp.println(F("</body>\r\n</html>"));
+        chunkedResp.end();
       } else {
-        char buff[DOWNLOAD_BUFFER_SIZE];
-        BufferedPrint bp(client, buff, sizeof(buff));
-        bp.println(F("HTTP/1.1 200 OK"));
-        bp.println(F("Connection: close"));
-        bp.print(F("Content-Length: "));
-        bp.println(file.size());
-        bp.print(F("Content-Type: "));
-        const char* ext = strchr(file.name(), '.');
-        bp.println(getContentType(ext));
-        bp.println();
-        while (file.available()) {
-          bp.write(file.read()); // send the file as body of the response
-        }
-        bp.flush();
+        char buff[RESPONSE_BUFFER_SIZE];
+        BufferedPrint response(client, buff, sizeof(buff));
+        response.println(F("HTTP/1.1 200 OK"));
+        response.println(F("Connection: close"));
+        response.print(F("Content-Length: "));
+        response.println(file.size());
+        response.print(F("Content-Type: "));
+        const char *ext = strchr(file.name(), '.');
+        response.println(getContentType(ext));
+        response.println();
+        response.copyAvailableFrom(file);
+        response.flush();
         file.close();
+        if (response.getWriteError()) {
+          Serial.println(F("Warning: write error."));
+        }
       }
     }
     client.stop();
