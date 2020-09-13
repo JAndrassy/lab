@@ -6,14 +6,22 @@
   by Juraj Andrassy https://github.com/jandrassy
 
 */
+#ifdef ESP32
+#include <WiFi.h>
+#else
 #include <ESP8266WiFi.h>
+#endif
 
 void setup() {
 
   Serial.begin(115200);
   delay(500);
 
+#ifdef ESP32
+//  WiFi.begin(); // use SSID and password stored by SDK. commented out to test the Configuration AP
+#else
 //  WiFi.disconnect(); // forget the persistent connection to test the Configuration AP
+#endif
 
   // waiting for connection to remembered  Wifi network
   Serial.println("Waiting for connection to WiFi");
@@ -38,7 +46,11 @@ void configAP() {
   WiFi.mode(WIFI_AP_STA); // starts the default AP (factory default or setup as persistent)
 
   Serial.print("Connect your computer to the WiFi network ");
+#ifdef ESP32
+  Serial.print("to SSID of you ESP32"); // no getter for SoftAP SSID
+#else
   Serial.print(WiFi.softAPSSID());
+#endif
   Serial.println();
   IPAddress ip = WiFi.softAPIP();
   Serial.print("and enter http://");
@@ -78,6 +90,8 @@ void configAP() {
         Serial.println();
         Serial.print("Attempting to connect to WPA SSID: ");
         Serial.println(ssid);
+        WiFi.persistent(true);
+        WiFi.setAutoConnect(true);
         WiFi.begin(ssid, pass);
         WiFi.waitForConnectResult();
 
