@@ -121,6 +121,7 @@ void configAP() {
           Serial.println("Connection successful. Ending AP.");
           configWebServer.stop();
           WiFi.mode(WIFI_STA);
+          return;
         }
       }
     }
