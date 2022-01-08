@@ -30,7 +30,7 @@
   along with this library.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#include <UIPEthernet.h> // or <Ethernet.h>
+#include <EthernetENC.h> // or <Ethernet.h>
 
 #define VERSION "0.17"
 
