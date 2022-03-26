@@ -1,5 +1,5 @@
 /**
- * avrdude running on Linux can use telnet to do a serial upload.
+ * avrdude can use telnet to do a serial upload.
  * this esp8266 sketch receives the upload and forwards it to Serial.
  * On the other side of the esp8266 Serial should be a Serial port
  * of AVR MCU with bootloader (the RX/TX pins where the bootloader listens)
@@ -15,9 +15,10 @@
  */
 
 #include <ESP8266WiFi.h>
+#include "arduino_secrets.h"
 
 //const int SERIAL_SWITCH_PIN = 4;
-const int TARGET_RESET_PIN = 0;
+const int TARGET_RESET_PIN = 5;
 
 WiFiServer telnetServer(23);
 
@@ -31,6 +32,8 @@ void setup() {
   pinMode(SERIAL_SWITCH_PIN, OUTPUT);
   digitalWrite(SERIAL_SWITCH_PIN, HIGH);
 #endif
+
+  WiFi.begin(SECRET_SSID, SECRET_PASS);
 
   if (!WiFi.waitForConnectResult()) {
     Serial.println("WiFi not connected");
@@ -56,7 +59,7 @@ void loop() {
 
     pinMode(TARGET_RESET_PIN, OUTPUT);
     digitalWrite(TARGET_RESET_PIN, LOW);
-    delay(1);
+    delayMicroseconds(5);
     pinMode(TARGET_RESET_PIN, INPUT); // let it to reset pin's pull-up
 
     while (telnetClient.connected() || telnetClient.available()) {
